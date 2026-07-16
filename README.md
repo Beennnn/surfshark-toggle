@@ -38,6 +38,8 @@ We tried the clean, user-space options first. None of them hold:
 
 That last row is the honest answer to *"why couldn't you do better?"*: **you can't**, not without admin. The reconnection lives in a privileged daemon and the profile is system-owned. The best achievable solution is therefore the **least-privileged** one that still works.
 
+> Want the full evidence — the actual `scutil --nc show` output proving the unconditional `Action: Connect` rule, and a point-by-point teardown of every failed approach? See **[docs/how-it-works.md](docs/how-it-works.md)**.
+
 ## The parade that works: disable the network service
 
 On-demand can reconnect a VPN. It **cannot connect a network service that is administratively disabled.**
@@ -62,6 +64,13 @@ youruser ALL=(root) NOPASSWD: /usr/sbin/networksetup -setnetworkserviceenabled *
 - We *don't* pin the exact service string in the rule because the name contains a space and a `®` (`Surfshark. WireGuard®`), which sudoers argument matching can't express cleanly. Scoping to the subcommand is the tightest bound that's actually robust.
 - `install.sh` writes the file to `/etc/sudoers.d/surfshark-toggle` **only after** `visudo -cf` validates it — a malformed sudoers file can lock you out of `sudo`, so it never installs an unvalidated one.
 
+## Requirements
+
+- macOS (verified on **26.5.2**, build 25F84; the mechanism is unchanged across recent macOS versions).
+- A VPN that shows up in `scutil --nc list` — Surfshark WireGuard/OpenVPN, or any other on-demand WireGuard/OpenVPN service.
+- An admin account (needed once, to install the sudoers rule).
+- No dependencies beyond stock macOS tools (`bash`, `scutil`, `networksetup`).
+
 ## Install
 
 ```bash
@@ -80,9 +89,60 @@ export SURFSHARK_SERVICE="Surfshark. OpenVPN (TCP)"
 
 The scripts resolve the connection UUID from the service name at runtime, so nothing is hardcoded to one machine.
 
+## Uninstall
+
+```bash
+./surfshark-on.sh     # optional: put the VPN back on first
+./uninstall.sh        # removes /etc/sudoers.d/surfshark-toggle
+```
+
+After uninstalling, off/on still work — they'll just prompt for your password again.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `service not found in scutil --nc list` | The name doesn't match. Run `scutil --nc list`, copy the quoted name exactly (mind the `.` and `®`), and set `SURFSHARK_SERVICE`. |
+| `surfshark-off.sh` still prompts for a password | `install.sh` didn't run, or your username changed. Re-run `./install.sh` and check `sudo cat /etc/sudoers.d/surfshark-toggle`. |
+| VPN reconnects a moment after `off` | Confirm the service is actually disabled: `networksetup -getnetworkserviceenabled "Surfshark. WireGuard®"` must say `Disabled`. If it says `Enabled`, the `off` command didn't run with privileges. |
+| `off` works but `on` doesn't reconnect | The service is re-enabled but on-demand hasn't fired yet; the script calls `scutil --nc start` for you — check `surfshark-status.sh`. Some setups need a few seconds. |
+| You want to see current state | `./surfshark-status.sh` — shows tunnel + whether the service is enabled. Read-only, no sudo. |
+
+## Security notes
+
+- The sudoers rule grants **NOPASSWD for one subcommand only**: `networksetup -setnetworkserviceenabled`. That subcommand can enable/disable network services and nothing else — no service creation/deletion, no DNS, routes, or proxy changes.
+- The rule is installed to `/etc/sudoers.d/surfshark-toggle`, mode `0440`, owner `root:wheel`, and is **validated with `visudo -cf` before installation** — a malformed sudoers file can lock you out of `sudo`, so it never installs an unvalidated one.
+- Nothing here touches your VPN credentials or the VPN profile itself. It only flips the OS-level enabled/disabled state of the network service.
+- Review [`install.sh`](install.sh) before running it — it's ~30 lines and does exactly what's described above.
+
 ## Wire it to a button (optional)
 
-Point a Stream Deck **System → Open** / multi-action, or an Automator/Shortcuts *Run Shell Script*, at `surfshark-off.sh` and `surfshark-on.sh`. Because of the sudoers rule, the button fires with no password prompt.
+Because of the sudoers rule, both scripts fire with no password prompt — ideal for a physical button:
+
+- **Stream Deck** — add a *System → Open* action (or the *BarRaider Advanced Launcher* plugin) pointing at the absolute path of `surfshark-off.sh`, and a second one at `surfshark-on.sh`. Use `surfshark-status.sh` output on a *Text* button if you want a live indicator.
+- **Shortcuts / Automator** — a *Run Shell Script* action with `/absolute/path/to/surfshark-off.sh`. Assign a global hotkey via *Shortcuts → Settings → keyboard shortcut*.
+- **Raycast / Alfred** — a Script Command that calls the absolute path.
+
+Use absolute paths (the scripts `cd` to their own directory to source `lib.sh`, so they're safe to call from anywhere).
+
+## Repository layout
+
+```
+surfshark-toggle/
+├── README.md                        this file
+├── CLAUDE.md                        context for AI/dev sessions
+├── LICENSE                          MIT
+├── lib.sh                           shared config + UUID resolution
+├── surfshark-off.sh                 VPN off (and stays off)
+├── surfshark-on.sh                  VPN on
+├── surfshark-status.sh              report state (read-only)
+├── install.sh                       install the scoped sudoers rule
+├── uninstall.sh                     remove it
+├── sudoers.d/
+│   └── surfshark-toggle.example     reference rule (do not hand-copy)
+└── docs/
+    └── how-it-works.md              the full technical writeup + evidence
+```
 
 ## Origin
 
