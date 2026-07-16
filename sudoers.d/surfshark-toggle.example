@@ -1,0 +1,8 @@
+# Example sudoers rule — DO NOT copy this by hand.
+# Run ./install.sh instead: it substitutes your username and validates the
+# file with `visudo -cf` before installing it (a malformed sudoers file can
+# lock you out of sudo).
+#
+# Installed to: /etc/sudoers.d/surfshark-toggle   (mode 0440, owner root:wheel)
+
+youruser ALL=(root) NOPASSWD: /usr/sbin/networksetup -setnetworkserviceenabled *
